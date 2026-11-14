@@ -1,0 +1,333 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head><style>
+@font-face {
+  font-family: "Optimistic";
+  font-style: normal;
+  font-weight: 400 600;
+  font-display: swap;
+  src: url("/fonts/OptimisticAI_VF_Optimized.woff2") format("woff2");
+}
+@font-face {
+  font-family: "Optimistic Mono";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("/fonts/OptimisticMono_W_TextRegular.woff2") format("woff2");
+}
+:where(html) {
+  font-family: "Optimistic", system-ui, sans-serif;
+}
+:where(code, pre, kbd, samp) {
+  font-family: "Optimistic Mono", ui-monospace, monospace;
+}
+</style>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Koda Cardápio - Gestão de Marmitas</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+<script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<style>
+.date-input{min-width:148px}
+@media(max-width:400px){.date-input{min-width:132px;font-size:13px}}
+.koda-titulo{font-weight:900;letter-spacing:.02em}
+.koda-branco{color:#ffffff}
+.koda-dourado{color:#facc15}
+</style>
+</head>
+<body class="bg-neutral-950 text-neutral-100 font-sans antialiased">
+<div id="root"></div>
+<script type="text/babel">
+const { useState, useEffect, useMemo } = React;
+const DIAS = [{key:'segunda',label:'Segunda'},{key:'terca',label:'Terça'},{key:'quarta',label:'Quarta'},{key:'quinta',label:'Quinta'},{key:'sexta',label:'Sexta'},{key:'sabado',label:'Sábado'}];
+const MENU_OLIVA = {
+  segunda:{pratos:['Arroz','Feijão','Purê de batata','Farofa com bacon e calabresa'],salada:'Alface, tomate e seleta de legumes'},
+  terca:{pratos:['Arroz','Tropeiro','Ovo frito','Batata frita'],salada:'Vinagrete'},
+  quarta:{pratos:['Arroz','Feijão','Batata rústica','Macarronada'],salada:'Salpicão'},
+  quinta:{pratos:['Arroz','Feijão','Seleta de legumes','Mandioca','Churrasco'],salada:'Tomate e cenoura'},
+  sexta:{pratos:['Arroz','Feijoada','Farofa','Couve'],salada:'Laranja, tomate e alface'},
+  sabado:{pratos:['Arroz','Feijão com calabresa e bacon','Macarronada','Batata frita'],salada:'Maionese'}
+};
+const FUNCIONARIOS_INICIAIS = ["KINCAS","IVANILDO","ENYSON","JOÃO BATISTA","MARCIO","AMAURY","TIAGO","KAKA","BRUNO","VALDIVANDO","FELIPE","ISAIAS","WESLEY","FERNANDO","EDIMAR","RAUAN","BENEDITO","PAULO MARCIO","SANTIAGO","CORLOS BOCA DE LATA","ELIZEU","GEOVANE","MARLON","FELIPE MONTADOR","MARQUINHO","DANIEL","JEFERSON","CARLÃO","LUCIANO","CICERO","MARCO","ANTONIO","PIMENTA","SALDANE","RONALDE","JOSÉ ROBERTO","CLERISVAN","HUGO DANIEL","EDILAENE","JAQUELINE","NARRY","LARISSA","LEANDRA","PATRICIA","ALEXANDRE","VITOR HUGO"].map((nome,i)=>({id:i+1,nome}));
+function hojeISO(){ const d=new Date(); return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'); }
+function formatarData(iso){ const p=iso.split('-'); return p[2]+'/'+p[1]+'/'+p[0]; }
+function diaSemanaKey(iso){ const p=iso.split('-').map(Number); const dt=new Date(p[0],p[1]-1,p[2]); const map=['domingo','segunda','terca','quarta','quinta','sexta','sabado']; return map[dt.getDay()]; }
+function labelDia(iso){ const map={domingo:'Domingo',segunda:'Segunda',terca:'Terça',quarta:'Quarta',quinta:'Quinta',sexta:'Sexta',sabado:'Sábado'}; return map[diaSemanaKey(iso)]; }
+function load(key, fallback){ try{ const v=localStorage.getItem(key); return v?JSON.parse(v):fallback; }catch(e){ return fallback; } }
+function save(key,val){ try{ localStorage.setItem(key, JSON.stringify(val)); }catch(e){} }
+function App(){
+  const [funcionarios,setFuncionarios]=useState(()=>load('koda_funcionarios_v5', FUNCIONARIOS_INICIAIS));
+  const [restaurantes,setRestaurantes]=useState(()=>load('koda_restaurantes_v5', [{id:1,nome:'Oliva Restaurante', cidade:'Raul Soares, MG', menu:MENU_OLIVA}]));
+  const [restId,setRestId]=useState(()=>load('koda_restaurante_atual_v5', 1));
+  const [pedidosPorData,setPedidosPorData]=useState(()=>load('koda_pedidos_v5', {}));
+  const [tamanhosPorData,setTamanhosPorData]=useState(()=>load('koda_tamanhos_v5', {}));
+  const [proteinas,setProteinas]=useState(()=>load('koda_proteinas_v5', ['Frango','Boi','Porco','Peixe']));
+  const [novaProteina,setNovaProteina]=useState('');
+  const [dataSel,setDataSel]=useState(hojeISO());
+  const [aba,setAba]=useState('pedidos');
+  const [busca,setBusca]=useState('');
+  const [filtro,setFiltro]=useState('todos');
+  const [novoNome,setNovoNome]=useState('');
+  const [editandoId,setEditandoId]=useState(null);
+  const [editNome,setEditNome]=useState('');
+  const [mostrarEditarRest,setMostrarEditarRest]=useState(false);
+  const [formRest,setFormRest]=useState(null);
+  const [msg,setMsg]=useState('');
+  const [cidadeBusca,setCidadeBusca]=useState('');
+  const [resultadosBusca,setResultadosBusca]=useState([]);
+  const [buscando,setBuscando]=useState(false);
+  const [msgBusca,setMsgBusca]=useState('');
+  useEffect(()=>save('koda_funcionarios_v5', funcionarios),[funcionarios]);
+  useEffect(()=>save('koda_restaurantes_v5', restaurantes),[restaurantes]);
+  useEffect(()=>save('koda_restaurante_atual_v5', restId),[restId]);
+  useEffect(()=>save('koda_pedidos_v5', pedidosPorData),[pedidosPorData]);
+  useEffect(()=>save('koda_tamanhos_v5', tamanhosPorData),[tamanhosPorData]);
+  useEffect(()=>save('koda_proteinas_v5', proteinas),[proteinas]);
+  const restaurante = restaurantes.find(r=>r.id===restId) || restaurantes[0];
+  const pedidos = pedidosPorData[dataSel] || {};
+  const tamanhos = tamanhosPorData[dataSel] || {};
+  const diaKey = diaSemanaKey(dataSel);
+  const menuHoje = diaKey==='domingo' ? null : (restaurante && restaurante.menu && restaurante.menu[diaKey] ? restaurante.menu[diaKey] : null);
+  const isHoje = dataSel===hojeISO();
+  const mudarPedido=(id,prot)=>{ setPedidosPorData(prev=>{ const atual=prev[dataSel]||{}; const novo={}; Object.keys(atual).forEach(k=>{novo[k]=atual[k]}); if(novo[id]===prot) delete novo[id]; else novo[id]=prot; const out={}; Object.keys(prev).forEach(k=>{out[k]=prev[k]}); out[dataSel]=novo; return out; }); };
+  const mudarTamanho=(id,tam)=>{ setTamanhosPorData(prev=>{ const atual=prev[dataSel]||{}; const novo={}; Object.keys(atual).forEach(k=>{novo[k]=atual[k]}); novo[id]=tam; const out={}; Object.keys(prev).forEach(k=>{out[k]=prev[k]}); out[dataSel]=novo; return out; }); };
+  const zerar=()=>{ if(confirm('Zerar os pedidos de '+formatarData(dataSel)+'?')){ setPedidosPorData(prev=>{ const out={}; Object.keys(prev).forEach(k=>{out[k]=prev[k]}); out[dataSel]={}; return out; }); setTamanhosPorData(prev=>{ const out={}; Object.keys(prev).forEach(k=>{out[k]=prev[k]}); out[dataSel]={}; return out; }); } };
+  const adicionarFunc=(e)=>{ e.preventDefault(); if(!novoNome.trim()) return; setFuncionarios(prev=>{ const arr=[]; prev.forEach(f=>arr.push(f)); arr.push({id:Date.now(),nome:novoNome.toUpperCase().trim()}); return arr; }); setNovoNome(''); };
+  const removerFunc=(id)=>{ if(confirm('Remover este funcionário?')){ setFuncionarios(prev=>prev.filter(f=>f.id!==id)); setPedidosPorData(prev=>{ const c={}; Object.keys(prev).forEach(d=>{ const n={}; Object.keys(prev[d]||{}).forEach(k=>{ if(Number(k)!==id) n[k]=prev[d][k]; }); c[d]=n; }); return c; }); } };
+  const salvarEdicaoFunc=()=>{ if(!editNome.trim()) return; setFuncionarios(prev=>prev.map(f=>f.id===editandoId ? {id:f.id,nome:editNome.toUpperCase().trim()} : f)); setEditandoId(null); };
+  const abrirEditarRest=()=>{ setFormRest(JSON.parse(JSON.stringify(restaurante))); setMostrarEditarRest(true); };
+  const salvarRest=()=>{ if(!formRest.nome.trim()) return; setRestaurantes(prev=>prev.map(r=>r.id===formRest.id?formRest:r)); setMostrarEditarRest(false); setMsg('Restaurante atualizado!'); setTimeout(()=>setMsg(''),3000); };
+  const novoRestaurante=()=>{ const novo={id:Date.now(), nome:'Novo Restaurante', menu: JSON.parse(JSON.stringify(MENU_OLIVA))}; setRestaurantes(prev=>{ const arr=[]; prev.forEach(r=>arr.push(r)); arr.push(novo); return arr; }); setRestId(novo.id); setFormRest(novo); setMostrarEditarRest(true); };
+  const contagemTamanhos = useMemo(()=>{ const c={P:0,M:0,G:0}; Object.keys(pedidos).forEach(k=>{ const v=pedidos[k]; if(v && v!=='Falta'){ const tam=(tamanhos[k]||'G'); if(c[tam]!==undefined) c[tam]++; } }); return c; },[pedidos, tamanhos]);
+  const matrizTamanhoProteina = useMemo(()=>{ const m={P:{},M:{},G:{}}; ['P','M','G'].forEach(sz=>{ proteinas.forEach(pr=>{ m[sz][pr]=0; }); m[sz]['Total']=0; }); Object.keys(pedidos).forEach(k=>{ const v=pedidos[k]; if(v && v!=='Falta' && proteinas.indexOf(v)!==-1){ const tam=(tamanhos[k]||'G'); m[tam][v]++; m[tam]['Total']++; } }); return m; },[pedidos, tamanhos, proteinas]);
+  const contagem = useMemo(()=>{ const c={Falta:0,total:0}; proteinas.forEach(pr=>{ c[pr]=0; }); Object.keys(pedidos).forEach(k=>{ const v=pedidos[k]; if(c[v]!==undefined) c[v]++; if(v && v!=='Falta') c.total++; }); return c; },[pedidos, proteinas]);
+  const filtrados = funcionarios.filter(f=>f.nome.toLowerCase().includes(busca.toLowerCase())).filter(f=>{ const esc=pedidos[f.id]||''; if(filtro==='todos') return true; if(filtro==='pendentes') return !esc; if(filtro==='falta') return esc==='Falta'; if(filtro==='escolheram') return esc && esc!=='Falta'; return true; });
+  const gerarResumo=()=>{ const linhas=[]; linhas.push('PEDIDOS - '+restaurante.nome+' - '+labelDia(dataSel)+' '+formatarData(dataSel)); if(menuHoje) linhas.push('Cardápio: '+menuHoje.pratos.join(', ')+' | Salada: '+menuHoje.salada); linhas.push(proteinas.map(pr=>pr+': '+(contagem[pr]||0)).join(' | ')+' | Falta: '+contagem.Falta); linhas.push('Total de marmitas: '+contagem.total); linhas.push('Marmitas por tamanho: Pequena (P): '+contagemTamanhos.P+' | Media (M): '+contagemTamanhos.M+' | Grande (G): '+contagemTamanhos.G); linhas.push('Por tamanho e proteina:'); ['P','M','G'].forEach(sz=>{ const label=sz==='P'?'Pequena':sz==='M'?'Media':'Grande'; linhas.push(label+' ('+sz+'): '+proteinas.map(pr=>pr+': '+(matrizTamanhoProteina[sz][pr]||0)).join(', ')+' | Total: '+matrizTamanhoProteina[sz]['Total']); }); linhas.push(''); funcionarios.forEach(f=>{ const esc=pedidos[f.id]||'Pendente'; const tam=tamanhos[f.id]||'G'; const tamLabel=tam==='P'?'Pequena':tam==='G'?'Grande':'Média'; linhas.push(f.nome+' - '+esc+' - '+tamLabel+' ('+tam+')'); }); return linhas.join('\n'); };
+  const gerarPDF=()=>{ try{
+    const JSPDF = window.jspdf && window.jspdf.jsPDF;
+    if(!JSPDF){ alert('Para gerar o PDF, precisa de internet na hora. Tente de novo com internet.'); return; }
+    const doc = new JSPDF({orientation:'portrait', unit:'mm', format:'a4'});
+    const cidade = (restaurante && restaurante.cidade) ? restaurante.cidade : 'Raul Soares, MG';
+    const dataStr = labelDia(dataSel) + ' - ' + formatarData(dataSel);
+    doc.setFillColor(10,10,10); doc.rect(0,0,210,28,'F');
+    doc.setFillColor(250,204,21); doc.rect(0,28,210,0.8,'F');
+    doc.setFont('helvetica','bold'); doc.setFontSize(22);
+    doc.setTextColor(255,255,255); doc.text('KODA', 14, 18);
+    doc.setTextColor(250,204,21); doc.text('CARDAPIO', 42, 18);
+    doc.setFontSize(7); doc.setTextColor(180,180,180); doc.setFont('helvetica','normal');
+    doc.text('GESTAO INTELIGENTE DE MARMITAS', 14, 23);
+    doc.setFontSize(9); doc.setTextColor(100,100,100); doc.text(dataStr, 150, 18);
+    let y = 36;
+    doc.setFont('helvetica','bold'); doc.setFontSize(14); doc.setTextColor(20,20,20);
+    doc.text(restaurante.nome, 14, y); y += 6;
+    doc.setFont('helvetica','normal'); doc.setFontSize(10); doc.setTextColor(80,80,80);
+    doc.text('Cidade: ' + cidade, 14, y);
+    if(restaurante.telefone){ y += 5; doc.text('Telefone: ' + restaurante.telefone, 14, y); }
+    if(restaurante.endereco){ y += 5; doc.text('Endereco: ' + restaurante.endereco, 14, y); }
+    y += 7;
+    doc.setFillColor(250,204,21); doc.rect(14, y-4, 182, 7, 'F');
+    doc.setFont('helvetica','bold'); doc.setFontSize(10); doc.setTextColor(10,10,10);
+    doc.text('CARDAPIO DO DIA - ' + labelDia(dataSel).toUpperCase(), 16, y); y += 7;
+    doc.setFont('helvetica','normal'); doc.setFontSize(10); doc.setTextColor(30,30,30);
+    if(menuHoje){ const pratosTxt = 'Pratos: ' + menuHoje.pratos.join(', '); const linhasPratos = doc.splitTextToSize(pratosTxt, 182); doc.text(linhasPratos, 14, y); y += linhasPratos.length * 5; doc.text('Salada: ' + menuHoje.salada, 14, y); y += 6; } else { doc.text('Domingo - Restaurante fechado', 14, y); y += 6; }
+    y += 2;
+    doc.setFont('helvetica','bold'); doc.setFontSize(10); doc.setTextColor(20,20,20);
+    const resumoCont = proteinas.map(pr=> pr + ': ' + (contagem[pr]||0)).join('  |  ') + '  |  Falta: ' + contagem.Falta + '  |  Total: ' + contagem.total;
+    doc.text(resumoCont, 14, y); y += 6;
+    // ===== TABELA QUANTIDADE POR TAMANHO E PROTEÍNA - CORES DIFERENTES =====
+    doc.setFont('helvetica','bold'); doc.setFontSize(11); doc.setTextColor(20,20,20);
+    doc.text('QUANTIDADE POR TAMANHO E PROTEINA', 14, y); y += 3;
+    // Cabeçalho da matriz
+    doc.setFillColor(30,30,30); doc.rect(14, y, 182, 7, 'F');
+    doc.setFont('helvetica','bold'); doc.setFontSize(9); doc.setTextColor(255,255,255);
+    doc.text('TAMANHO', 16, y+5);
+    let colX = 55;
+    const colW = 127 / (proteinas.length + 1);
+    proteinas.forEach(pr=>{ doc.text(pr.toUpperCase(), colX, y+5); colX += colW; });
+    doc.text('TOTAL', colX, y+5);
+    y += 7;
+    // Linhas coloridas: P azul, M verde, G dourado
+    const cores = {P:[37,99,235], M:[22,163,74], G:[217,119,6]};
+    const nomesTam = {P:'PEQUENA (P)', M:'MEDIA (M)', G:'GRANDE (G)'};
+    ['P','M','G'].forEach(sz=>{
+      const cor = cores[sz];
+      doc.setFillColor(cor[0], cor[1], cor[2]); doc.rect(14, y, 182, 7, 'F');
+      doc.setFont('helvetica','bold'); doc.setFontSize(9); doc.setTextColor(255,255,255);
+      doc.text(nomesTam[sz], 16, y+5);
+      let cx = 55;
+      proteinas.forEach(pr=>{ doc.text(String(matrizTamanhoProteina[sz][pr]||0), cx, y+5); cx += colW; });
+      doc.text(String(matrizTamanhoProteina[sz]['Total']||0), cx, y+5);
+      y += 7;
+    });
+    y += 3;
+    doc.setFont('helvetica','normal'); doc.setFontSize(8); doc.setTextColor(100,100,100);
+    doc.text('Pequena em azul, Media em verde, Grande em dourado - para conferir rapido.', 14, y); y += 7;
+    // ===== LISTA DETALHADA COM COR POR TAMANHO =====
+    doc.setFont('helvetica','bold'); doc.setFontSize(10); doc.setTextColor(20,20,20);
+    doc.text('DETALHADO POR FUNCIONARIO', 14, y); y += 3;
+    doc.setFillColor(30,30,30); doc.rect(14, y, 182, 7, 'F');
+    doc.setFont('helvetica','bold'); doc.setFontSize(9); doc.setTextColor(255,255,255);
+    doc.text('#', 16, y+5); doc.text('FUNCIONARIO', 24, y+5); doc.text('PROTEINA', 115, y+5); doc.text('TAMANHO', 165, y+5);
+    y += 7;
+    doc.setFont('helvetica','normal'); doc.setFontSize(9);
+    let idx2 = 0;
+    funcionarios.forEach(f=>{
+      idx2++;
+      if(y > 275){
+        doc.addPage();
+        doc.setFillColor(10,10,10); doc.rect(0,0,210,14,'F');
+        doc.setFont('helvetica','bold'); doc.setFontSize(12);
+        doc.setTextColor(255,255,255); doc.text('KODA', 14, 10);
+        doc.setTextColor(250,204,21); doc.text('CARDAPIO', 32, 10);
+        doc.setFont('helvetica','normal'); doc.setFontSize(8); doc.setTextColor(100,100,100);
+        doc.text(restaurante.nome + ' - ' + dataStr, 120, 10);
+        y = 22;
+        doc.setFont('helvetica','bold'); doc.setFontSize(9); doc.setTextColor(255,255,255);
+        doc.setFillColor(30,30,30); doc.rect(14, y, 182, 7, 'F');
+        doc.text('#', 16, y+5); doc.text('FUNCIONARIO', 24, y+5); doc.text('PROTEINA', 115, y+5); doc.text('TAMANHO', 165, y+5);
+        y += 7;
+        doc.setFont('helvetica','normal'); doc.setFontSize(9);
+      }
+      const esc = pedidos[f.id] || 'Pendente';
+      const tam = tamanhos[f.id] || 'G';
+      const tamLabel = tam==='P' ? 'Pequena (P)' : tam==='G' ? 'Grande (G)' : 'Media (M)';
+      const corTam = tam==='P' ? [37,99,235] : tam==='M' ? [22,163,74] : [217,119,6];
+      if(idx2 % 2 === 0){ doc.setFillColor(245,245,245); doc.rect(14, y, 182, 6, 'F'); }
+      doc.setTextColor(30,30,30);
+      doc.text(String(idx2), 16, y+4);
+      doc.text(f.nome, 24, y+4);
+      doc.text(esc, 115, y+4);
+      doc.setFont('helvetica','bold'); doc.setTextColor(corTam[0], corTam[1], corTam[2]);
+      doc.text(tamLabel, 165, y+4);
+      doc.setFont('helvetica','normal');
+      y += 6;
+    });
+    y += 4;
+    if(y > 270){ doc.addPage(); y = 20; }
+    doc.setFont('helvetica','normal'); doc.setFontSize(8); doc.setTextColor(120,120,120);
+    doc.text('KODA CARDAPIO - (c) 2026 Koda Studio. Todos os direitos reservados.', 14, y);
+    doc.text('Gerado em ' + new Date().toLocaleString('pt-BR'), 14, y+5);
+    doc.save('koda-cardapio-' + restaurante.nome.replace(/\s+/g,'-').toLowerCase() + '-' + dataSel + '.pdf');
+    setMsg('PDF gerado! Agora é só enviar no WhatsApp.'); setTimeout(()=>setMsg(''),4000);
+  }catch(e){ alert('Erro ao gerar PDF. Verifique a internet e tente de novo.'); } };
+  const copiarResumo=()=>{ const t=gerarResumo(); try{ navigator.clipboard.writeText(t).then(()=>{ setMsg('Resumo copiado!'); setTimeout(()=>setMsg(''),3000); }); }catch(e){ const ta=document.createElement('textarea'); ta.value=t; document.body.appendChild(ta); ta.select(); document.execCommand('copy'); ta.remove(); setMsg('Resumo copiado!'); setTimeout(()=>setMsg(''),3000); } };
+  const enviarWhats=()=>{ window.open('https://wa.me/?text='+encodeURIComponent(gerarResumo()), '_blank'); };
+  const exportarBackup=()=>{ const dados={app:'Koda Cardapio',versao:'v5',exportadoEm:new Date().toISOString(),funcionarios,restaurantes,restauranteAtualId:restId,pedidosPorData,tamanhosPorData,proteinas}; const blob=new Blob([JSON.stringify(dados,null,2)],{type:'application/json'}); const url=URL.createObjectURL(blob); const a=document.createElement('a'); a.href=url; a.download='koda-cardapio-backup-'+hojeISO()+'.json'; document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url); setMsg('Backup exportado!'); setTimeout(()=>setMsg(''),4000); };
+  const importarBackup=(e)=>{ const file=e.target.files && e.target.files[0]; if(!file) return; const reader=new FileReader(); reader.onload=()=>{ try{ const dados=JSON.parse(reader.result); if(!dados.funcionarios || !dados.pedidosPorData) throw new Error('invalido'); if(!confirm('Importar backup? Isso vai substituir os dados atuais.')) return; if(Array.isArray(dados.funcionarios)) setFuncionarios(dados.funcionarios); if(Array.isArray(dados.restaurantes)) setRestaurantes(dados.restaurantes); if(dados.restauranteAtualId) setRestId(dados.restauranteAtualId); if(dados.pedidosPorData) setPedidosPorData(dados.pedidosPorData); if(dados.tamanhosPorData) setTamanhosPorData(dados.tamanhosPorData); if(Array.isArray(dados.proteinas)) setProteinas(dados.proteinas); setMsg('Backup importado!'); setTimeout(()=>setMsg(''),4000); }catch(err){ alert('Arquivo de backup inválido.'); } }; reader.readAsText(file); e.target.value=''; };
+  const adicionarProteina=()=>{ const n=novaProteina.trim(); if(!n) return; const up=n.charAt(0).toUpperCase()+n.slice(1).toLowerCase(); if(proteinas.indexOf(up)!==-1) return; setProteinas(prev=>{ const arr=[]; prev.forEach(x=>arr.push(x)); arr.push(up); return arr; }); setNovaProteina(''); };
+  const limparTelefone=(tel)=>{ if(!tel) return ''; let d=tel.replace(/\D/g,''); if(d.charAt(0)==='0') d=d.slice(1); if(d.length===10||d.length===11) d='55'+d; return d; };
+  const buscarRestaurantes=()=>{ if(!cidadeBusca.trim()){ setMsgBusca('Digite a cidade primeiro. Ex: Raul Soares, MG'); return; } setBuscando(true); setMsgBusca('Buscando restaurantes próximos de '+cidadeBusca+'...'); setResultadosBusca([]); fetch('https://nominatim.openstreetmap.org/search?format=json&limit=1&q='+encodeURIComponent(cidadeBusca)).then(r=>r.json()).then(geo=>{ if(!geo || !geo.length) throw new Error('Cidade não encontrada'); const lat=parseFloat(geo[0].lat); const lon=parseFloat(geo[0].lon); const query='[out:json][timeout:25];(node(around:15000,'+lat+','+lon+')["amenity"="restaurant"];way(around:15000,'+lat+','+lon+')["amenity"="restaurant"];node(around:15000,'+lat+','+lon+')["amenity"="fast_food"];);out center 60;'; return fetch('https://overpass-api.de/api/interpreter',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:'data='+encodeURIComponent(query)}).then(r=>r.json()); }).then(over=>{ const lista=[]; (over.elements||[]).forEach(el=>{ const tags=el.tags||{}; const nome=tags.name||''; if(!nome) return; const tel=tags.phone||tags['contact:phone']||tags['contact:mobile']||''; const site=tags.website||tags['contact:website']||''; let end=''; if(tags['addr:street']) end=tags['addr:street']+(tags['addr:housenumber']?' '+tags['addr:housenumber']:''); lista.push({id:el.id,nome:nome,telefone:tel,site:site,endereco:end}); }); const unicos=[]; const vistos={}; lista.forEach(r=>{ const k=r.nome.toLowerCase(); if(!vistos[k]){ vistos[k]=1; unicos.push(r); } }); setResultadosBusca(unicos); setMsgBusca(unicos.length ? 'Encontrei '+unicos.length+' restaurantes próximos de '+cidadeBusca+'. Clique em Adicionar para incluir no sistema.' : 'Nenhum restaurante encontrado no mapa para '+cidadeBusca+'. Tente a cidade vizinha ou cadastre manualmente.'); setBuscando(false); }).catch(err=>{ setMsgBusca('Erro ao buscar. Verifique a internet e tente de novo. Se continuar, cadastre manualmente na aba Restaurante.'); setBuscando(false); }); };
+  const adicionarRestauranteDaBusca=(r)=>{ let existe=false; restaurantes.forEach(x=>{ if(x.nome.toLowerCase()===r.nome.toLowerCase()) existe=true; }); if(existe){ if(!confirm(r.nome+' já está no sistema. Adicionar de novo?')) return; } const novo={id:Date.now(),nome:r.nome,telefone:r.telefone||'',cidade:cidadeBusca,endereco:r.endereco||'',site:r.site||'',menu:JSON.parse(JSON.stringify(MENU_OLIVA))}; setRestaurantes(prev=>{ const arr=[]; prev.forEach(x=>arr.push(x)); arr.push(novo); return arr; }); setRestId(novo.id); setAba('restaurante'); setMsg('Restaurante '+r.nome+' adicionado ao sistema! Agora é só editar o cardápio se precisar.'); setTimeout(()=>setMsg(''),5000); };
+  const mudarData=(delta)=>{ const p=dataSel.split('-').map(Number); const dt=new Date(p[0],p[1]-1,p[2]); dt.setDate(dt.getDate()+delta); setDataSel(dt.getFullYear()+'-'+String(dt.getMonth()+1).padStart(2,'0')+'-'+String(dt.getDate()).padStart(2,'0')); };
+  return (
+    <div className="min-h-screen">
+      <header className="bg-neutral-900 border-b border-amber-500/30 px-4 md:px-6 py-4 flex flex-col md:flex-row justify-between items-center gap-4">
+        <div className="flex items-center gap-3 w-full md:w-auto">
+          <div className="w-12 h-12 bg-neutral-950 border border-amber-500/50 rounded-xl flex items-center justify-center shrink-0"><span className="koda-titulo koda-dourado text-2xl">K</span></div>
+          <div><h1 className="text-2xl koda-titulo leading-none"><span className="koda-branco">KODA</span> <span className="koda-dourado">CARDÁPIO</span></h1><p className="text-xs tracking-[0.2em] text-neutral-400 mt-1">GESTÃO INTELIGENTE DE MARMITAS</p></div>
+        </div>
+        <div className="flex items-center gap-2 w-full md:w-auto justify-center">
+          <button onClick={()=>setDataSel(hojeISO())} className="bg-neutral-800 px-4 py-2.5 rounded-full text-sm">Hoje</button>
+          <button onClick={()=>mudarData(-1)} className="bg-neutral-800 w-10 h-10 rounded-full">‹</button>
+          <div className="flex items-center gap-2 bg-neutral-800 px-3 py-2 rounded-full"><span>📅</span><input type="date" value={dataSel} onChange={e=>setDataSel(e.target.value)} className="date-input bg-transparent text-sm font-semibold outline-none" /></div>
+          <button onClick={()=>mudarData(1)} className="bg-neutral-800 w-10 h-10 rounded-full">›</button>
+        </div>
+        <nav className="grid grid-cols-4 gap-1 bg-neutral-950 p-1.5 rounded-xl border border-neutral-800 w-full md:flex md:w-auto">
+          <button onClick={()=>setAba('pedidos')} className={'px-2 py-2 rounded-lg text-xs md:text-sm whitespace-nowrap flex-1 '+(aba==='pedidos'?'bg-amber-500 text-neutral-950 font-bold':'text-neutral-400')}>Pedidos</button>
+          <button onClick={()=>setAba('restaurante')} className={'px-2 py-2 rounded-lg text-xs md:text-sm whitespace-nowrap flex-1 '+(aba==='restaurante'?'bg-amber-500 text-neutral-950 font-bold':'text-neutral-400')}>Restaurante</button>
+          <button onClick={()=>setAba('funcionarios')} className={'px-2 py-2 rounded-lg text-xs md:text-sm whitespace-nowrap flex-1 '+(aba==='funcionarios'?'bg-amber-500 text-neutral-950 font-bold':'text-neutral-400')}>Funcionários ({funcionarios.length})</button>
+          <button onClick={()=>setAba('buscar')} className={'px-2 py-2 rounded-lg text-xs md:text-sm whitespace-nowrap flex-1 flex items-center justify-center gap-1 '+(aba==='buscar'?'bg-emerald-500 text-neutral-950 font-bold':'bg-emerald-500/15 text-emerald-300 border border-emerald-500/40 font-bold')}>🔍 Buscar</button>
+        </nav>
+      </header>
+      <div className="max-w-7xl mx-auto w-full px-4 pt-2 flex justify-start md:justify-end items-center gap-1.5 flex-nowrap overflow-x-auto whitespace-nowrap pb-1">
+        <span className="text-[11px] text-neutral-500 shrink-0">Restaurante:</span>
+        <select value={restId} onChange={e=>setRestId(Number(e.target.value))} className="bg-neutral-900 border border-amber-500/40 text-neutral-100 px-2 py-1 rounded-full text-[11px] font-bold outline-none max-w-[130px] shrink-0">
+          {restaurantes.map(r=>(<option key={r.id} value={r.id}>{r.nome}</option>))}
+        </select>
+        <span className="text-[11px] text-neutral-500 shrink-0">Backup:</span>
+        <button onClick={exportarBackup} className="bg-neutral-900 border border-neutral-800 text-neutral-400 px-2 py-1 rounded-full text-[11px] shrink-0">⬇ Exportar</button>
+        <label className="bg-neutral-900 border border-neutral-800 text-neutral-400 px-2 py-1 rounded-full text-[11px] cursor-pointer shrink-0">⬆ Importar<input type="file" accept=".json,application/json" onChange={importarBackup} className="hidden" /></label>
+      </div>
+      {msg && <div className="mx-4 mt-4 bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 px-4 py-3 rounded-xl text-sm text-center">{msg}</div>}
+      <main className="max-w-7xl mx-auto px-4 py-4">
+        {aba==='pedidos' && (
+          <div className="space-y-4">
+            <div className="bg-neutral-900 border border-neutral-800 rounded-2xl p-4">
+              <div className="flex flex-col md:flex-row justify-between gap-3 items-start md:items-center">
+                <div><h2 className="text-xl font-black">Pedidos • {restaurante.nome}</h2><p className="text-sm text-neutral-400 mt-0.5">📅 {labelDia(dataSel)} • {formatarData(dataSel)} {isHoje && <span className="bg-amber-500 text-neutral-950 text-xs px-2 py-0.5 rounded-full font-bold ml-1">Hoje</span>}</p>{menuHoje ? <p className="text-xs text-neutral-400 mt-1">Cardápio de hoje: {menuHoje.pratos.join(', ')} | Salada: {menuHoje.salada}</p> : <p className="text-xs text-red-400 mt-1">Domingo - Restaurante fechado</p>}</div>
+                <div className="grid grid-cols-4 gap-1.5 w-full md:flex md:w-auto md:gap-2"><button onClick={gerarPDF} className="flex-1 bg-neutral-950 border border-amber-500/50 text-amber-400 px-2 py-2 rounded-xl text-[11px] md:text-sm font-bold whitespace-nowrap">📄 PDF</button><button onClick={copiarResumo} className="flex-1 bg-emerald-500 text-white px-2 py-2 rounded-xl text-[11px] md:text-sm font-bold whitespace-nowrap">Copiar</button><button onClick={enviarWhats} className="flex-1 bg-[#25D366] text-neutral-950 px-2 py-2 rounded-xl text-[11px] md:text-sm font-bold whitespace-nowrap">WhatsApp</button><button onClick={zerar} className="flex-1 bg-red-500/10 border border-red-500/30 text-red-400 px-2 py-2 rounded-xl text-[11px] md:text-sm whitespace-nowrap">Zerar</button></div>
+              </div>
+              <div className="flex gap-2 bg-neutral-950 px-3 py-3 rounded-xl border border-neutral-800 justify-between text-center text-xs flex-wrap mt-3">{proteinas.map(pr=>(<div key={pr}><span className="block text-neutral-400">{pr}</span><b className="text-base">{contagem[pr]||0}</b></div>))}<div><span className="block text-neutral-400">Falta</span><b className="text-base">{contagem.Falta}</b></div><div><span className="block text-amber-400 font-bold">Total</span><b className="text-base text-amber-400">{contagem.total}</b></div></div>
+            </div>
+            <div className="flex gap-1.5 flex-nowrap overflow-x-auto pb-1 -mx-1 px-1">{['todos','pendentes','falta','escolheram'].map(f=>{ const label=f==='todos'?'Todos':f==='pendentes'?'Pendentes':f==='falta'?'Falta':'Já escolheram'; return (<button key={f} onClick={()=>setFiltro(f)} className={'px-3 py-1.5 rounded-full text-xs whitespace-nowrap shrink-0 '+(filtro===f?'bg-amber-500 text-neutral-950 font-bold':'bg-neutral-900 border border-neutral-800')}>{label}</button>); })}<span className="text-xs text-neutral-400 self-center ml-1 whitespace-nowrap shrink-0">Mostrando {filtrados.length} de {funcionarios.length}</span></div>
+            <input value={busca} onChange={e=>setBusca(e.target.value)} placeholder="Buscar funcionário..." className="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-4 py-3 text-sm outline-none focus:border-amber-500" />
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">{filtrados.map(func=>{ const esc=pedidos[func.id]||''; return (<div key={func.id} className="bg-neutral-900 border border-neutral-800 rounded-xl p-4 flex flex-col gap-3"><div className="flex justify-between items-start gap-2"><div className="flex items-center gap-2 flex-1"><span className={'w-2.5 h-2.5 rounded-full shrink-0 '+(esc && esc!=='Falta'?'bg-emerald-500':'bg-red-500')}></span><h3 className="font-bold text-sm">{func.nome}</h3></div><span className={'text-xs px-2 py-1 rounded-md '+(esc && esc!=='Falta'?'bg-amber-500/10 text-amber-400 border border-amber-500/20':esc==='Falta'?'bg-red-500/10 text-red-400 border border-red-500/20':'bg-neutral-800 text-neutral-400')}>{esc||'Pendente'}</span></div><div className="flex items-center gap-2 pt-2 border-t border-neutral-800"><span className="text-[11px] text-neutral-400 font-bold">TAMANHO:</span><div className="flex gap-1 flex-1">{['P','M','G'].map(t=>{ const tamAtual=tamanhos[func.id]||'G'; const label=t==='P'?'Pequena':t==='G'?'Grande':'Média'; return (<button key={t} onClick={()=>mudarTamanho(func.id,t)} className={'flex-1 py-1.5 text-[11px] font-bold rounded-lg '+(tamAtual===t?'bg-amber-500 text-neutral-950':'bg-neutral-800 text-neutral-300')}>{t} - {label}</button>); })}</div></div><div className="grid grid-cols-3 gap-1.5 pt-2 border-t border-neutral-800">{proteinas.concat(['Falta']).map(op=>(<button key={op} onClick={()=>mudarPedido(func.id,op)} className={'py-2 text-[11px] font-bold rounded-lg '+(esc===op?(op==='Falta'?'bg-red-500 text-white':'bg-amber-500 text-neutral-950'):'bg-neutral-800 text-neutral-300')}>{op}</button>))}</div></div>); })}</div>
+          </div>
+        )}
+        {aba==='restaurante' && (
+          <div className="space-y-5">
+            <div className="bg-neutral-900 border border-neutral-800 rounded-2xl p-5">
+              <p className="font-bold text-sm">📋 Restaurantes Cadastrados ({restaurantes.length})</p>
+              <p className="text-xs text-neutral-400 mt-1">Toque em Selecionar para trocar. Ex: Oliva Restaurante, ou o restaurante de teste que você adicionou.</p>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-2 mt-3">
+                {restaurantes.map(r=>(
+                  <div key={r.id} className={'flex items-center justify-between gap-2 border rounded-xl px-3 py-2.5 '+(r.id===restId?'border-amber-500 bg-amber-500/10':'border-neutral-800 bg-neutral-950')}>
+                    <div className="flex-1 min-w-0"><p className="font-bold text-sm truncate">{r.nome} {r.id===restId && <span className="text-[10px] bg-amber-500 text-neutral-950 px-1.5 py-0.5 rounded-full ml-1">ATUAL</span>}</p>{r.cidade ? <p className="text-[11px] text-neutral-400 truncate">📍 {r.cidade}</p> : null}{r.telefone ? <p className="text-[11px] text-neutral-400 truncate">📞 {r.telefone}</p> : null}</div>
+                    <div className="flex gap-1 shrink-0">
+                      {r.id!==restId && <button onClick={()=>setRestId(r.id)} className="bg-amber-500 text-neutral-950 px-3 py-1.5 rounded-lg text-[11px] font-bold">Selecionar</button>}
+                      <button onClick={()=>{ setRestId(r.id); abrirEditarRest(); }} className="bg-neutral-800 px-3 py-1.5 rounded-lg text-[11px]">Editar</button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+            <div className="bg-neutral-900 border border-neutral-800 rounded-2xl p-5"><div className="flex justify-between items-start gap-3"><div><h2 className="text-xl font-black">{restaurante.nome}</h2><p className="text-sm text-neutral-400 mt-1">Cardápio da semana - segunda a sábado. Domingo fechado.</p>{restaurante.telefone ? <p className="text-sm text-neutral-400 mt-1">📞 {restaurante.telefone}</p> : null}{restaurante.cidade ? <p className="text-sm text-neutral-400">📍 {restaurante.cidade}</p> : null}</div><button onClick={abrirEditarRest} className="bg-neutral-800 border border-neutral-700 px-4 py-2.5 rounded-xl text-sm shrink-0">Editar Restaurante</button></div><button onClick={novoRestaurante} className="mt-4 bg-amber-500 text-neutral-950 font-bold px-4 py-2.5 rounded-xl text-sm">+ Novo Restaurante</button></div>
+            <div className="bg-neutral-900 border border-neutral-800 rounded-2xl p-4"><p className="font-bold text-sm">Cardápio da Semana • {restaurante.nome}</p><div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3 mt-3">{DIAS.map(d=>{ const mm=restaurante.menu && restaurante.menu[d.key]; if(!mm) return null; return (<div key={d.key} className="bg-neutral-950 border border-neutral-800 rounded-xl p-3"><p className="text-amber-400 font-bold text-sm">{d.label}</p><p className="text-xs mt-1">{mm.pratos.join(', ')}</p><p className="text-xs text-neutral-400 mt-1">Salada: {mm.salada}</p></div>); })}</div><p className="text-xs text-neutral-400 mt-3">Para trocar, use a lista acima ou o seletor lá em cima.</p></div>
+          </div>
+        )}
+        {aba==='funcionarios' && (
+          <div className="space-y-5">
+            <form onSubmit={adicionarFunc} className="flex gap-2"><input value={novoNome} onChange={e=>setNovoNome(e.target.value)} placeholder="Nome do funcionário..." className="flex-1 bg-neutral-900 border border-neutral-800 rounded-xl px-4 py-3 text-sm outline-none" /><button className="bg-amber-500 text-neutral-950 font-bold px-5 py-3 rounded-xl text-sm">+ Adicionar</button></form>
+            <div className="bg-neutral-900 border border-neutral-800 rounded-2xl overflow-hidden"><div className="p-4 border-b border-neutral-800 font-bold text-sm">Colaboradores Cadastrados ({funcionarios.length})</div><div className="divide-y divide-neutral-800 max-h-[600px] overflow-y-auto">{funcionarios.map((f,i)=>(<div key={f.id} className="p-4 flex items-center justify-between gap-3"><div className="flex items-center gap-3 flex-1"><span className="text-xs text-neutral-500 w-6">{i+1}.</span>{editandoId===f.id ? (<input autoFocus value={editNome} onChange={e=>setEditNome(e.target.value)} onKeyDown={e=>{if(e.key==='Enter') salvarEdicaoFunc(); if(e.key==='Escape') setEditandoId(null);}} className="flex-1 bg-neutral-950 border border-amber-500 rounded-lg px-3 py-1.5 text-sm outline-none" />) : (<span className="font-medium text-sm">{f.nome}</span>)}</div><div className="flex gap-1">{editandoId===f.id ? (<><button onClick={salvarEdicaoFunc} className="bg-amber-500 text-neutral-950 px-3 py-1.5 rounded-lg text-xs font-bold">Salvar</button><button onClick={()=>setEditandoId(null)} className="bg-neutral-800 px-3 py-1.5 rounded-lg text-xs">Cancelar</button></>) : (<button onClick={()=>{setEditandoId(f.id); setEditNome(f.nome);}} className="text-neutral-400 hover:text-amber-400 px-2 py-1 text-xs border border-neutral-800 rounded-lg">Editar</button>)}<button onClick={()=>removerFunc(f.id)} className="text-neutral-500 hover:text-red-400 px-2 py-1 text-xs">Excluir</button></div></div>))}</div></div>
+          </div>
+        )}
+        {aba==='buscar' && (
+          <div className="space-y-5">
+            <div className="bg-neutral-900 border border-neutral-800 rounded-2xl p-5"><h2 className="text-2xl font-black mt-1">🔍 Encontrar Restaurantes Próximos</h2><p className="text-sm text-neutral-400 mt-2">Digite a cidade para buscar restaurantes próximos no mapa. Veja o contato e adicione o restaurante ao sistema com 1 clique.</p><div className="flex flex-col md:flex-row gap-2 mt-4"><input value={cidadeBusca} onChange={e=>setCidadeBusca(e.target.value)} onKeyDown={e=>{if(e.key==='Enter') buscarRestaurantes();}} placeholder="Ex: Raul Soares, MG ou São Paulo, SP" className="flex-1 bg-neutral-950 border border-neutral-800 rounded-xl px-4 py-3 text-sm outline-none focus:border-emerald-500" /><button onClick={buscarRestaurantes} disabled={buscando} className="bg-emerald-500 text-neutral-950 font-bold px-6 py-3 rounded-xl text-sm disabled:opacity-50">{buscando ? 'Buscando...' : 'Buscar Restaurantes'}</button></div>{msgBusca && <p className="text-sm text-emerald-300 bg-emerald-500/10 border border-emerald-500/20 rounded-xl px-4 py-3 mt-4">{msgBusca}</p>}<p className="text-xs text-neutral-500 mt-3">Fonte: OpenStreetMap. Mostra restaurantes cadastrados no mapa. Se algum não aparecer, cadastre manualmente na aba Restaurante.</p></div>
+            {resultadosBusca.length>0 && (<div className="grid grid-cols-1 md:grid-cols-2 gap-3">{resultadosBusca.map(r=>{ const telLimpo=limparTelefone(r.telefone); const waLink=telLimpo ? 'https://wa.me/'+telLimpo+'?text='+encodeURIComponent('Olá '+r.nome+'! Vim pelo Koda Cardápio e gostaria de falar sobre as marmitas. Posso falar com o responsável?') : ''; return (<div key={r.id} className="bg-neutral-900 border border-neutral-800 rounded-xl p-4 flex flex-col gap-2"><div className="flex justify-between items-start gap-2"><h3 className="font-bold text-sm">{r.nome}</h3><span className="text-[11px] bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 px-2 py-1 rounded-full shrink-0">Novo</span></div>{r.endereco ? <p className="text-xs text-neutral-400">📍 {r.endereco} • {cidadeBusca}</p> : null}<p className="text-xs">📞 {r.telefone || 'Sem telefone no mapa'}</p>{r.site ? <a href={r.site} target="_blank" rel="noopener noreferrer" className="text-xs text-amber-400 underline truncate">{r.site}</a> : null}<div className="flex gap-2 mt-2">{telLimpo ? <a href={waLink} target="_blank" rel="noopener noreferrer" className="flex-1 bg-[#25D366] text-neutral-950 text-center py-2 rounded-lg text-xs font-bold">💬 WhatsApp</a> : null}{telLimpo ? <a href={'tel:'+telLimpo} className="flex-1 bg-neutral-800 text-center py-2 rounded-lg text-xs font-bold">📞 Ligar</a> : null}<button onClick={()=>adicionarRestauranteDaBusca(r)} className="flex-1 bg-amber-500 text-neutral-950 py-2 rounded-lg text-xs font-bold">➕ Adicionar ao Sistema</button></div></div>); })}</div>)}
+            {resultadosBusca.length===0 && !buscando && (<div className="bg-neutral-900 border border-dashed border-neutral-800 rounded-2xl p-5 text-center"><p className="text-sm text-neutral-400">Nenhum restaurante buscado ainda. Digite a cidade da empresa e clique em Buscar.</p><button onClick={novoRestaurante} className="mt-3 bg-neutral-800 px-4 py-2 rounded-xl text-xs font-bold">+ Cadastrar Restaurante Manualmente</button></div>)}
+          </div>
+        )}
+      </main>
+      <footer className="mt-10 mx-4 mb-4 bg-neutral-900 border border-neutral-800 rounded-2xl px-5 py-4 text-center">
+        <p className="text-sm font-bold"><span className="koda-branco">KODA</span> <span className="koda-dourado">CARDÁPIO</span> <span className="text-neutral-500 font-normal">• Gestão Inteligente de Marmitas</span></p>
+        <p className="text-xs text-neutral-400 mt-1.5">© 2026 Koda Studio. Todos os direitos reservados.</p>
+        <a href="https://wa.me/5531997244447?text=Ol%C3%A1!%20Vim%20pelo%20Koda%20Card%C3%A1pio%20e%20quero%20falar%20com%20o%20respons%C3%A1vel%20do%20aplicativo." target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1.5 mt-3 bg-[#25D366]/10 border border-[#25D366]/30 text-[#25D366] px-3 py-1.5 rounded-full text-[11px] font-bold">💬 Falar com Koda Studio no WhatsApp</a>
+      </footer>
+      {mostrarEditarRest && formRest && (
+        <div className="fixed inset-0 bg-black/70 flex items-end md:items-center justify-center p-0 md:p-4 z-50">
+          <div className="bg-neutral-900 w-full max-w-2xl max-h-[92vh] overflow-y-auto rounded-t-2xl md:rounded-2xl p-5">
+            <div className="flex justify-between items-center"><h3 className="font-bold text-lg">Editar Restaurante</h3><button onClick={()=>setMostrarEditarRest(false)} className="bg-neutral-800 w-8 h-8 rounded-full">X</button></div>
+            <label className="block text-xs text-neutral-400 mt-4">Nome do restaurante</label>
+            <input value={formRest.nome} onChange={e=>setFormRest(Object.assign({},formRest,{nome:e.target.value}))} className="w-full bg-neutral-950 border border-neutral-800 rounded-xl px-4 py-3 mt-1 outline-none focus:border-amber-500" />
+            <label className="block text-xs text-neutral-400 mt-4">Cidade onde está</label>
+            <input value={formRest.cidade||''} onChange={e=>setFormRest(Object.assign({},formRest,{cidade:e.target.value}))} placeholder="Ex: Raul Soares, MG" className="w-full bg-neutral-950 border border-neutral-800 rounded-xl px-4 py-3 mt-1 outline-none focus:border-amber-500" />
+            <p className="text-xs text-neutral-500 mt-1">Essa cidade sai no PDF.</p>
+            <p className="text-xs text-neutral-500 mt-1">Edite o nome e o cardápio. As mudanças aparecem na hora.</p>
+            <div className="space-y-4 mt-5">{DIAS.map(d=>{ const m=formRest.menu[d.key]||{pratos:[],salada:''}; return (<div key={d.key} className="border border-neutral-800 rounded-xl p-3"><p className="font-bold text-amber-400 text-sm">{d.label}</p><label className="text-xs text-neutral-400">Pratos (separados por vírgula)</label><textarea value={m.pratos.join(', ')} onChange={e=>{ const pratos=e.target.value.split(',').map(s=>s.trim()).filter(Boolean); const novoMenu={}; Object.keys(formRest.menu).forEach(k=>{novoMenu[k]=formRest.menu[k]}); novoMenu[d.key]={pratos:pratos,salada:m.salada}; setFormRest(Object.assign({},formRest,{menu:novoMenu})); }} className="w-full bg-neutral-950 border border-neutral-800 rounded-lg px-3 py-2 mt-1 text-sm outline-none" rows={2} /><label className="text-xs text-neutral-400">Salada</label><input value={m.salada} onChange={e=>{ const novoMenu={}; Object.keys(formRest.menu).forEach(k=>{novoMenu[k]=formRest.menu[k]}); novoMenu[d.key]={pratos:m.pratos,salada:e.target.value}; setFormRest(Object.assign({},formRest,{menu:novoMenu})); }} className="w-full bg-neutral-950 border border-neutral-800 rounded-lg px-3 py-2 mt-1 text-sm outline-none" /></div>); })}</div>
+            <div className="border border-neutral-800 rounded-xl p-3 mt-5"><p className="font-bold text-amber-400 text-sm">Proteínas</p><p className="text-xs text-neutral-400 mt-1">Adicione uma nova proteína e ela aparece em todos os funcionários.</p><div className="flex flex-wrap gap-2 mt-3">{proteinas.map(pr=>(<span key={pr} className="flex items-center gap-1 bg-neutral-950 border border-neutral-800 px-3 py-1.5 rounded-full text-xs">{pr} <button onClick={()=>{ if(confirm('Remover '+pr+'?')) setProteinas(prev=>prev.filter(x=>x!==pr)); }} className="text-red-400 font-bold ml-1">x</button></span>))}<span className="bg-neutral-950 border border-neutral-800 px-3 py-1.5 rounded-full text-xs">Falta (fixo)</span></div><div className="flex gap-2 mt-3"><input value={novaProteina} onChange={e=>setNovaProteina(e.target.value)} placeholder="Nova proteína ex: Linguiça" className="flex-1 bg-neutral-950 border border-neutral-800 rounded-lg px-3 py-2 text-sm outline-none" /><button onClick={adicionarProteina} className="bg-amber-500 text-neutral-950 font-bold px-4 py-2 rounded-lg text-sm">+ Adicionar proteína</button></div></div>
+            <div className="flex gap-2 mt-5"><button onClick={salvarRest} className="flex-1 bg-amber-500 text-neutral-950 font-bold py-3 rounded-xl">Salvar Restaurante</button><button onClick={()=>setMostrarEditarRest(false)} className="flex-1 bg-neutral-800 py-3 rounded-xl">Cancelar</button></div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+const root=ReactDOM.createRoot(document.getElementById('root'));
+root.render(<App/>);
+</script>
+<script>(function(){var loc=location.href.replace(/#.*$/,"");var ATTR_NAMES=["data-product-id","data-productid","data-product_id","product-id","productid","product_id","data-source-entity-id","source-entity-id","source_entity_id","data-product","data-metadata","data-meta"];var DATASET_KEYS=["productId","productid","product_id","sourceEntityId","sourceentityid","source_entity_id","product","metadata","meta"];function readProductId(value){if(typeof value!=="string"||value.length===0)return null;if(/^[0-9]{6,}$/.test(value))return value;var match=value.match(/(?:product(?:_|-)?id|source(?:_|-)?entity(?:_|-)?id)["'=:\s]+([0-9]{6,})/i);return match?match[1]:null}function extractProductId(start){for(var node=start;node&&node!==document.body;node=node.parentElement){for(var i=0;i<ATTR_NAMES.length;i++){var attrValue=node.getAttribute&&node.getAttribute(ATTR_NAMES[i]);var attrProductId=readProductId(attrValue);if(attrProductId)return attrProductId}var dataset=node.dataset||null;if(dataset){for(var j=0;j<DATASET_KEYS.length;j++){var dataValue=dataset[DATASET_KEYS[j]];var dataProductId=readProductId(dataValue);if(dataProductId)return dataProductId}}}return null}function isInlineMediaSlotElement(node){return !!(node&&node.getAttribute&&node.getAttribute("data-clippy-inline-media-slot")!==null)}function findInlineMediaSlot(start){for(var node=start;node&&node!==document.body;node=node.parentElement){if(isInlineMediaSlotElement(node))return node}return null}function readInlineMediaUrl(node){if(!node)return null;return node.getAttribute&&((node.getAttribute("data-clippy-inline-media-url")||node.getAttribute("data-url")||node.getAttribute("data_url")))||node.href||null}function stripHash(url){return String(url).replace(/#.*$/,"")}function urlsMatch(a,b){if(!a||!b)return false;try{return stripHash(new URL(a,loc).href)===stripHash(new URL(b,loc).href)}catch(_){return stripHash(a)===stripHash(b)}}function isFirstPartyReelUrl(value){try{var url=new URL(value,loc);if(url.protocol!=="https:")return false;var host=url.hostname.toLowerCase();var supported=host==="instagram.com"||host.endsWith(".instagram.com")||host==="facebook.com"||host.endsWith(".facebook.com");return supported&&/\/reels?\//i.test(url.pathname)}catch(_){return false}}function isInlineMediaUrlClick(node,href){var slot=findInlineMediaSlot(node);if(!slot)return false;var slotUrl=readInlineMediaUrl(slot);if(slotUrl)return urlsMatch(href,slotUrl);return isFirstPartyReelUrl(href)}function findDataHref(start){for(var node=start;node&&node!==document.body;node=node.parentElement){if(node.getAttribute){var href=node.getAttribute("data-href")||node.getAttribute("data-url");if(href)return{href:href,node:node}}}return null}var nativeOpen=window.open;window.open=function(url){if(parent!==window&&typeof url==="string"&&/^https?:\/\//.test(url)){parent.postMessage({type:"ecto:usercontent-link-click",href:url},"*");return null}return nativeOpen?nativeOpen.apply(window,arguments):null};document.addEventListener("click",function(e){var target=e.target instanceof Element?e.target:null;if(!target)return;if(parent===window)return;var a=target.closest?target.closest("a[href]"):null;if(a&&a.href&&/^https?:\/\//.test(a.href)&&a.href.replace(/#.*$/,"")!==loc){if(isInlineMediaUrlClick(a,a.href))return;var productId=extractProductId(target)||extractProductId(a);if(productId){e.preventDefault();parent.postMessage({type:"ecto-artifact-link-click",productId:productId},"*");return}e.preventDefault();parent.postMessage({type:"ecto:usercontent-link-click",href:a.href},"*");return}var dataHref=findDataHref(target);if(dataHref&&/^https?:\/\//.test(dataHref.href)&&dataHref.href.replace(/#.*$/,"")!==loc){if(isInlineMediaUrlClick(dataHref.node,dataHref.href))return;e.preventDefault();parent.postMessage({type:"ecto:usercontent-link-click",href:dataHref.href},"*")}},true)})();</script><script>(function(){var FOCUS_TYPE="ecto:artifact-focus-request";var CLOSE_TYPE="ecto:artifact-close-request";function focusArtifactDocument(){var body=document.body;if(!body)return;try{window.focus();}catch(e){}if(!body.hasAttribute("tabindex"))body.setAttribute("tabindex","-1");try{body.focus({preventScroll:true});}catch(e){try{body.focus();}catch(e2){}}}window.addEventListener("message",function(event){if(event.source!==window.parent)return;var data=event.data;if(!data||typeof data!=="object"||data.type!==FOCUS_TYPE)return;if(document.readyState==="loading"){document.addEventListener("DOMContentLoaded",focusArtifactDocument,{once:true});return;}focusArtifactDocument();});window.addEventListener("keydown",function(event){if(event.key!=="Escape")return;window.setTimeout(function(){if(event.defaultPrevented)return;window.parent.postMessage({type:CLOSE_TYPE},"*");},0);});})();</script></body>
+</html>
